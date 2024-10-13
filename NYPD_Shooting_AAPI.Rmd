@@ -1,0 +1,242 @@
+---
+title: "Asian / Pacific Islander Shooting Violence in New York"
+output: html_document
+author: "Timmy Luo"
+date: "2024-09-03"
+---
+
+This analysis explores shooting incidents in New York City, focusing on the relationship between borough, time, and the involvement of Asian/Pacific Islander victims and perpetrators. Using the publicly available NYPD data, we aim to identify patterns in the occurrence of shootings and the racial groups of those involved. The goal of this analysis is to understand how these trends vary across boroughs and over time, and to make simple predictions for future incidents.
+
+The historical dataset that we will import goes back to 2006 through to 2023 and contains information about each shooting incident that occurred. The goal of this analysis is to see what patterns we can shed light on.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Packages
+```{r importpackages, include=TRUE, echo=TRUE}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+```
+
+## Import Data
+```{r importrawdata, include=TRUE,echo=TRUE}
+# Imports the shooting incident dataset from the City of New York
+nypd_shooting_raw <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+```{r import_data, include=TRUE,echo=TRUE}
+# Enables refresh of our captured data during testing without having to import from the City of New York again
+nypd_shooting <- nypd_shooting_raw
+```
+
+Let's take a look at the data that we imported.
+
+```{r data_preview, include=TRUE,echo=TRUE}
+glimpse(nypd_shooting)
+summary(nypd_shooting)
+```
+
+For this basic analysis and modelling exercise, we will be using the below columns.
+
+|Column|Notes|
+|-:|:-:|
+|OCCUR_DATE|in MM/DD/YYYY format|
+|BORO|Name of the New York borough|
+|PERP_RACE|Perpetrator race|
+|VIC_RACE|Victim race|
+
+Below is my action plan to tidy the data required.
+
+|Column|Data Issue|Action Plan|
+|-:|:-:|:-:|
+|OCCUR_DATE|chr column upon import|Will mutate to date|
+|BORO|No issue found||
+|PERP_RACE|Missing data|Impute|
+|VIC_RACE|Missing data|Impute|
+
+## Tidy Data
+
+```{r tidydata, include=TRUE, echo=TRUE}
+# Converts the OCCUR_DATE column to a date column for easier manipulation later on
+nypd_shooting <- nypd_shooting %>% 
+  mutate(
+    OCCUR_DATE = mdy(OCCUR_DATE) # Converting to date column
+  )
+```
+
+## Impute Data
+
+For this analysis, we will impute using "Unknown" for the columns that have missing data.
+
+```{r imputedata, include=TRUE, echo=TRUE}
+# Defines a function that we will use for imputation of missing data within our desired columns
+impute_missing <- function(df, columns, value) {
+  df %>%
+    mutate(across(all_of(columns), ~ifelse(is.na(.) | . %in% c("NA", "UNKNOWN", "(null)"), value, .)))
+}
+
+# List of columns to impute
+column_list <- c("PERP_RACE","VIC_RACE")
+
+# Impute missing values in our column list with "Unknown"
+nypd_shooting <- impute_missing(nypd_shooting, column_list, "Unknown")
+```
+
+
+## Visualizations & Analysis
+
+Let's start with a basic view on what the distribution of incidents are by borough.
+
+```{r plot_boro, include=TRUE, echo=TRUE}
+nypd_shooting_by_borough <- nypd_shooting %>%
+  group_by(BORO) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+ggplot(nypd_shooting_by_borough, aes(x = reorder(BORO,-Count), y = Count)) +
+  geom_bar(stat = "identity", fill = "#f9ab22", color = "#06063d") +
+  labs(title = "Distribution of Incidents by Borough",
+       x = "Borough",
+       y = "Shooting Incidents") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5))
+```
+
+Brooklyn leads the five boroughs in terms of shooting incidents, followed by Bronx, Queens, Manhattan, and Staten Island respectively.
+
+Now let's being to involve the victim and perpetrator race into our graphing.
+
+```{r plot_boro_race, include=TRUE, echo=TRUE}
+nypd_shooting_by_boro_vicrace <- nypd_shooting %>%
+  group_by(BORO, VIC_RACE) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  group_by(BORO) %>%
+  mutate(Percentage = Count / sum(Count) * 100)
+
+nypd_shooting_by_boro_perprace <- nypd_shooting %>%
+  group_by(BORO, PERP_RACE) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  group_by(BORO) %>%
+  mutate(Percentage = Count / sum(Count) * 100)
+
+ggplot(nypd_shooting_by_boro_vicrace, aes(x = BORO, y = Percentage, fill = VIC_RACE)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Incident Distribution by Borough and Victim Race",
+       x = "Borough",
+       fill = "Victim Race") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5))
+
+ggplot(nypd_shooting_by_boro_perprace, aes(x = BORO, y = Percentage, fill = PERP_RACE)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Incident Distribution by Borough and Perpetrator Race",
+       x = "Borough",
+       fill = "Perpetrator Race") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5))
+```
+
+When plotting the shooting incidents over the years into one chart, we can see that the majority of reported shootings involve a Black victim.
+
+The perpetrator incident distribution graph also confirms that a large portion of the perpetrators are reported as being Black. A sizable percentage of the perpetrator race being Unknown suggests that the perpetrator was not found and/or reported.
+
+Asian / Pacific Islander victims and perpetrators are the most active within the borough of Queens.
+
+Let's take a look at how this distribution has changed over the years.
+
+```{r plot_year_race, include=TRUE, echo=TRUE}
+nypd_shooting_by_year_vicrace <- nypd_shooting %>%
+  mutate(Year = format(OCCUR_DATE, "%Y")) %>%
+  group_by(Year, VIC_RACE) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  group_by(Year) %>%
+  mutate(Percentage = Count / sum(Count) * 100)
+
+nypd_shooting_by_year_perprace <- nypd_shooting %>%
+  mutate(Year = format(OCCUR_DATE, "%Y")) %>%
+  group_by(Year, PERP_RACE) %>%
+  summarise(Count = n(), .groups = 'drop') %>%
+  group_by(Year) %>%
+  mutate(Percentage = Count / sum(Count) * 100)
+
+ggplot(nypd_shooting_by_year_vicrace, aes(x = Year, y = Percentage, fill = VIC_RACE)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Incident Distribution by Year and Victim Race",
+       x = "Year",
+       fill = "Victim Race") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5))
+
+ggplot(nypd_shooting_by_year_perprace, aes(x = Year, y = Percentage, fill = PERP_RACE)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Incident Distribution by Year and Perpetrator Race",
+       x = "Year",
+       fill = "Perpetrator Race") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.title = element_text(hjust = 0.5))
+```
+
+The distribution charts by year and perpetrator/victim race shows an increase in the percent of incidents involving Asian / Pacific Islanders. While the percentage is small when compared to others, this is a worrying trend.
+
+Let's create a basic model that takes the Asian / Pacific Islander victims as a function of the Asian / Pacific Islander perpetrators. Since the overall count is low, we will calculate it for every 1000 incidents.
+
+```{r asian_pi_modeling, include=TRUE, echo=TRUE}
+nypd_shooting_by_borough <- nypd_shooting %>%
+  mutate(Year = format(OCCUR_DATE, "%Y")) %>%
+  group_by(Year,BORO) %>%
+  summarise(
+    Count = n(),
+    asian_perp_percentage = (sum(PERP_RACE == "ASIAN / PACIFIC ISLANDER") / n()) * 1000,
+    asian_vic_percentage = (sum(VIC_RACE == "ASIAN / PACIFIC ISLANDER") / n()) * 1000,
+    .groups = 'drop'
+  )
+
+mod <- lm(asian_vic_percentage ~ asian_perp_percentage, data = nypd_shooting_by_borough)
+summary(mod)
+```
+
+``` {r asian_pi_pred, include=TRUE, echo=TRUE}
+# Creates a new dataframe and column for the predicted values
+nypd_shooting_by_borough_pred <- nypd_shooting_by_borough %>% mutate(prediction = predict(mod))
+
+glimpse(nypd_shooting_by_borough_pred)
+```
+
+We have our new dataframe with predictions included for each year and boro. Let's plot out what our linear model has generated.
+
+```{r plot_boro_vic_perp_asian_pi, include=TRUE, echo=TRUE}
+ggplot(nypd_shooting_by_borough_pred, aes(x = asian_perp_percentage)) +
+  geom_point(aes(y = asian_vic_percentage), color = "blue") +
+  geom_point(aes(y = prediction), color = "red") +
+  labs(title = "Asian/Pacific Islander Perpetrators vs Victims",
+       subtitle = "Per 1000 shooting incidents",
+       x = "Asian / Pacific Islander Perpetrator",
+       y = "Asian / Pacific Islander Victim") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust=0.5))
+```
+
+## Conclusion
+This analysis and associated modelling looks at the relationship between Asian/Pacific Islander perpetrators and victims in our dataset. We found that as the percentage of Asian perpetrators increases, the percentage of Asian victims tends to rise as well. This suggests a possible link between the two groups.
+
+While the data shows a clear trend, it's important to keep in mind that many factors can affect these numbers, such as borough size and policing policies. The predictions based on our model give us a shallow glimpse into this relationship, and they are just one piece of the puzzle.
+
+Deepening this connection and analysis can help us understand and address issues of shooting violence in the New York community. 
+
+### Bias
+The analysis focused on the Asian / Pacific Islander group due to recent events as well as the author's ethnic group. There are many different subgroups within the category and could be an additional avenue of future analysis.
+
+Within the dataset, the race of perpetrators is not always recorded within the dataset, which could skew the results.
+
+Finally, this analysis is limited to the reported data and thus only the reported shootings. This does not take into account changes in reporting or law enforcement policies and practices over the years.
+
+```{r sI, echo=FALSE}
+sessionInfo()
+```
